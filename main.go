@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/cloudwego/eino-ext/components/model/ark" // 假设使用 Ark 节点
+	"github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
@@ -48,10 +48,10 @@ func NewBashTool() (tool.InvokableTool, error) {
 		},
 	)
 }
-func BuildAgent(ctx context.Context, chatModel model.ToolCallingChatModel, bashTool tool.InvokableTool) (compose.Runnable[[]*schema.Message, []*schema.Message], error) {
+func BuildAgent(ctx context.Context, chatModel model.ToolCallingChatModel, bashTool tool.InvokableTool) (compose.Runnable[[]*schema.Message, *schema.Message], error) {
 	// 1. 创建画板 (Graph)
 	// 输入是消息列表，输出也是消息列表
-	g := compose.NewGraph[[]*schema.Message, []*schema.Message]()
+	g := compose.NewGraph[[]*schema.Message, *schema.Message]()
 
 	// 2. 添加模型节点
 	// 绑定工具，这样模型知道自己可以调用 bash
@@ -86,14 +86,12 @@ func BuildAgent(ctx context.Context, chatModel model.ToolCallingChatModel, bashT
 	}
 
 	// 关键：根据模型输出决定是去执行工具，还是直接结束
-	branch := compose.NewGraphBranch(func(ctx context.Context, msgs []*schema.Message) (string, error) {
-		if len(msgs) == 0 {
+	branch := compose.NewGraphBranch(func(ctx context.Context, msg *schema.Message) (string, error) {
+		if msg == nil {
 			return compose.END, nil
 		}
-
-		lastMsg := msgs[len(msgs)-1]
 		// 如果模型生成了 ToolCalls，就走工具节点
-		if len(lastMsg.ToolCalls) > 0 {
+		if len(msg.ToolCalls) > 0 {
 			return "tools", nil
 		}
 		// 否则，任务完成，走结束节点
@@ -118,12 +116,12 @@ func main() {
 	// 1. 初始化 ChatModel (这里以 Ark 为例，你需要根据你的 base_url 配置)
 	apiKey := strings.TrimSpace(os.Getenv("ARK_API_KEY"))
 	if apiKey == "" {
-		apiKey = "ak_22b0vG31R1BJ1VD4Ej2YU2Vq3Im6R"
+		apiKey = os.Getenv("ARK_API_KEY")
 	}
 
 	baseURL := strings.TrimSpace(os.Getenv("ARK_BASE_URL"))
 	if baseURL == "" {
-		baseURL = "https://api.longcat.chat/anthropic/"
+		baseURL = "https://api.longcat.chat/openai"
 	}
 
 	modelName := strings.TrimSpace(os.Getenv("ARK_MODEL"))
@@ -131,7 +129,7 @@ func main() {
 		modelName = "LongCat-Flash-Chat"
 	}
 
-	chatModel, err := ark.NewChatModel(ctx, &ark.ChatModelConfig{
+	chatModel, err := openai.NewChatModel(ctx, &openai.ChatModelConfig{
 		BaseURL: baseURL,
 		APIKey:  apiKey,
 		Model:   modelName,
@@ -151,10 +149,23 @@ func main() {
 		fmt.Printf("build agent failed: %v\n", err)
 		return
 	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Printf("get current working directory failed: %v\n", err)
+		return
+	}
 
+	system := fmt.Sprintf(`You are a coding agent at %s. Use bash to solve tasks.
+Act, don't explain.
+When creating or overwriting a file with multiple lines or complex characters,
+ALWAYS use the following 'cat' format to avoid quoting issues, and the double quotes outside the code should be removed:
+cat << 'EOF' > filename.py
+print("Hello, World!")
+EOF
+`, cwd)
 	// 运行任务
 	input := []*schema.Message{
-		schema.SystemMessage("You are a coding agent. Use bash."),
+		schema.SystemMessage(system),
 		schema.UserMessage("Create a file 'test.py', then run it and tell me the output."),
 	}
 
@@ -163,11 +174,11 @@ func main() {
 		fmt.Printf("invoke agent failed: %v\n", err)
 		return
 	}
-	if len(output) == 0 {
+	if output == nil {
 		fmt.Println("agent returned no messages")
 		return
 	}
 
 	// 最后一条消息就是 LLM 在执行完所有步骤后的总结
-	fmt.Println(output[len(output)-1].Content)
+	fmt.Println(output.Content)
 }
