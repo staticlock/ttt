@@ -1,0 +1,49 @@
+# This workflow will build a golang project
+# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-go
+
+name: Go Build and Release
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # 允许推送标签和代码
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.24'
+
+    - name: Build
+      run: go build -v -o main ./...
+
+    - name: Test
+      run: go test -v ./...
+
+    - name: Tag Version
+      if: github.ref == 'refs/heads/main'
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        TAG="v$(date +'%Y%m%d%H%M%S')"  # 示例：自动生成时间戳标签
+        echo "TAG=${TAG}" >> $GITHUB_ENV  # 将变量导出到后续步骤
+        git tag $TAG
+        git push origin $TAG
+    
+    - name: Create Release
+      if: github.ref == 'refs/heads/main'
+      uses: softprops/action-gh-release@v1
+      with:
+        files: main
+        tag_name: ${{ env.TAG }}  # 引用上面创建的标签
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
