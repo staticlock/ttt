@@ -4,7 +4,6 @@ go 1.25.6
 
 require (
 	github.com/cloudwego/eino v0.8.3
-	github.com/cloudwego/eino-ext/components/model/ark v0.1.65
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.10
 )
 
